@@ -1,0 +1,78 @@
+#!/bin/bash
+# note - 更新/查看右下角气泡文案（BubbleNote）
+#
+# 用法：
+#   note 文字内容          设置文案（多个词自动用空格连接）
+#   note "第一行
+#   第二行"                引号内保留换行，支持多行
+#   echo 文字 | note       从管道/标准输入读取内容
+#   note                   无参数时查看当前文案
+#   note --clear           清空文案（气泡隐藏）
+#   note --help            显示本帮助
+#
+# 说明：内容写入 message.txt 后，BubbleNote 监听到变化会自动刷新气泡。
+
+set -euo pipefail
+
+# ---- 定位脚本真实目录（兼容符号链接，便于把 note 软链到 PATH）----
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+MSG_FILE="$DIR/message.txt"
+
+# ---- 帮助 ----
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+fi
+
+# ---- 清空 ----
+if [ "${1:-}" = "--clear" ]; then
+    : > "$MSG_FILE"
+    echo "气泡文案已清空"
+    exit 0
+fi
+
+# ---- 确定内容来源 ----
+if [ -p /dev/stdin ] && [ "$#" -eq 0 ]; then
+    # 管道输入（如 echo xxx | note）
+    CONTENT="$(cat)"
+elif [ "$#" -ge 1 ]; then
+    # 直接传参，多个参数用空格连接
+    CONTENT="$*"
+else
+    # 无参数且无管道：查看当前文案
+    if [ -f "$MSG_FILE" ]; then
+        echo "当前气泡文案："
+        cat "$MSG_FILE"
+    else
+        echo "文案文件不存在：$MSG_FILE"
+        exit 1
+    fi
+    exit 0
+fi
+
+# ---- 写入并确保 BubbleNote 在运行 ----
+if [ -z "$CONTENT" ]; then
+    echo "内容为空，未做任何修改（如需清空请用 note --clear）"
+    exit 1
+fi
+
+printf '%s\n' "$CONTENT" > "$MSG_FILE"
+
+if ! pgrep -x BubbleNote > /dev/null 2>&1; then
+    open "$DIR/BubbleNote.app" 2>/dev/null && sleep 0.5
+    if pgrep -x BubbleNote > /dev/null 2>&1; then
+        echo "BubbleNote 未运行，已自动启动"
+    else
+        echo "注意：BubbleNote 未在运行，启动失败（可先执行 $DIR/build.sh）"
+    fi
+fi
+
+echo "气泡文案已更新："
+echo "$CONTENT"

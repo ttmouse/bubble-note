@@ -1,0 +1,9 @@
+# 编译产物（重新 ./build.sh 即可生成）
+BubbleNote.app/
+
+# 自动备份文件
+*.bak-*
+*.bak
+
+# macOS
+.DS_Store
