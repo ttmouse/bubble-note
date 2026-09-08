@@ -53,26 +53,43 @@ struct Config {
     static let runAwayDuration: TimeInterval = 0.30
     /// 躲藏动画：起跳高度（pt）
     static let hopHeight: CGFloat = 16
-    /// 自主随机表情池（emotion.txt 为空时，机器人像活物一样自行换表情）
-    static let aliveFaces: [String] = [
+    /// 平静表情池（emotion.txt 为空且文案无明显情绪时，从这里温和地换表情）
+    static let calmFaces: [String] = [
         "(•‿•)",      // 开心
-        "(•̀ᴗ•́)و",    // 元气
-        "(◕‿◕)",      // 满足
         "(-‿-)",      // 眯眯眼
+        "(◕‿◕)",      // 满足
+        "(•̀ᴗ•́)و",    // 元气
+        "(•_•)",      // 淡定
+        "(｡•̀ᴗ-)✧",   // 眨眼
         "(￣▽￣)",    // 得意
         "(¬‿¬)",      // 调皮
-        "(•_•)",      // 淡定
-        "(⊙_⊙)",      // 惊讶
-        "(￣～￣)",    // 撇嘴思考
-        "(•_•)?",     // 疑惑
-        "(￣□￣)",    // 呆住
-        "(｡•̀ᴗ-)✧",   // 眨眼
-        "(︶︹︺)",    // 无奈
-        "(T_T)",      // 委屈
-        "zZ(-_-)",    // 犯困
     ]
-    /// 自主模式下两次随机换脸的间隔范围（秒）
-    static let aliveIntervalRange: ClosedRange<Double> = 6...14
+    /// 无情绪匹配时的默认表情
+    static let defaultFace = "(•‿•)"
+    /// 自主模式下两次表情变化的间隔范围（秒）
+    static let aliveIntervalRange: ClosedRange<Double> = 5...12
+
+    // MARK: 文案情绪判断（关键词启发式）
+
+    /// 依据文案内容推断情绪并返回对应表情；无法判断时返回 nil
+    static func detectEmotion(in text: String) -> String? {
+        // 顺序即优先级：疑问 → 惊讶 → 难过 → 困 → 思考 → 积极 → 生气
+        let rules: [([String], String)] = [
+            (["？", "?", "吗", "呢", "怎么", "什么", "为什么", "如何", "行不行", "好不好", "是不是", "能否", "可不可以"], "(•_•)?"),      // 疑惑
+            (["竟然", "居然", "哇", "天哪", "不会吧", "没想到", "吃惊", "吓一跳"], "(⊙_⊙)"),                                      // 惊讶
+            (["失败", "报错", "错误", "挂了", "坏了", "延期", "抱歉", "对不起", "难过", "伤心", "哭", "完蛋", "崩了", "没通过"], "(T_T)"),  // 难过
+            (["困", "睡觉", "睡了", "晚安", "休息", "累了", "疲惫"], "zZ(-_-)"),                                                // 犯困
+            (["方案", "分析", "考虑", "想想", "想一下", "研究", "优化", "思路", "琢磨", "该怎么", "要不要", "该不该", "评估", "看看"], "(￣～￣)"), // 思考
+            (["恭喜", "成功", "完成", "搞定", "加油", "太好了", "开心", "棒", "厉害", "通过", "没问题", "可以了", "胜利", "赢", "很好"], "(•‿•)"), // 开心
+            (["生气", "愤怒", "气死", "烦", "讨厌", "受不了"], "(╬ Ò﹏Ó)"),                                                       // 生气
+        ]
+        for (keywords, face) in rules {
+            for kw in keywords where text.contains(kw) {
+                return face
+            }
+        }
+        return nil
+    }
 }
 
 // MARK: - 气泡视图（自绘圆角背景 + 文本标签）
@@ -287,7 +304,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentFace = initialEmotion
         } else {
             lockedFace = nil
-            currentFace = Config.aliveFaces.randomElement() ?? ""
+            // 初始表情：能判断文案情绪就用对应表情，否则用平静默认脸
+            currentFace = Config.detectEmotion(in: initialText) ?? Config.defaultFace
         }
 
         // 创建气泡视图
@@ -346,7 +364,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("BubbleNote: 已启动，读取文案来自 %@", messageURL.path)
     }
 
-    // MARK: 自主随机表情（活物感）
+    // MARK: 自主表情（活物感 + 情绪感知）
 
     private func startAliveTimer() {
         scheduleAliveTick()
@@ -360,24 +378,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// 每次心跳决定一次表情：
+    ///   - 文案能判断出情绪 → 用对应的表情（并稳定保持）
+    ///   - 判断不出情绪 → 从平静池温和地换一个，保持正常有生命感
     private func aliveTick() {
         defer { scheduleAliveTick() }   // 无论是否换脸都继续循环
         guard let window, window.isVisible, !dismissed, lockedFace == nil else { return }
-        let face = randomFace(differentFrom: currentFace)
-        guard face != currentFace, let bubbleView else { return }
-        currentFace = face
-        bubbleView.emotion = face
+
+        let text = bubbleView.text
+        let target: String
+        if let matched = Config.detectEmotion(in: text) {
+            target = matched
+        } else {
+            target = calmFace(differentFrom: currentFace)
+        }
+        guard target != currentFace, let bubbleView else { return }
+        currentFace = target
+        bubbleView.emotion = target
         applyLayout(on: window.screen ?? NSScreen.main)
         writeState()
     }
 
-    private func randomFace(differentFrom current: String) -> String {
-        let pool = Config.aliveFaces
-        guard pool.count > 1 else { return current }
-        var face = pool.randomElement() ?? current
+    /// 从平静池挑一个表情（尽量不与当前相同，保持微微变化）
+    private func calmFace(differentFrom current: String) -> String {
+        let pool = Config.calmFaces
+        guard pool.count > 1 else { return Config.defaultFace }
+        var face = pool.randomElement() ?? Config.defaultFace
         var tries = 0
         while face == current && tries < 5 {
-            face = pool.randomElement() ?? current
+            face = pool.randomElement() ?? Config.defaultFace
             tries += 1
         }
         return face
@@ -438,15 +467,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let text = loadText()
         let fileEmotion = loadEmotion()
 
-        // 更新表情锁定状态：emotion.txt 非空则锁定该表情；被清空则恢复自主随机
+        // 更新表情锁定状态：emotion.txt 非空则锁定该表情；被清空则恢复自主
         if !fileEmotion.isEmpty {
             lockedFace = fileEmotion
             currentFace = fileEmotion
-        } else if !lastFileEmotion.isEmpty {
-            lockedFace = nil
-            currentFace = randomFace(differentFrom: currentFace)
         } else {
             lockedFace = nil
+            // 无锁定时尽量贴合文案情绪
+            if let matched = Config.detectEmotion(in: text) {
+                currentFace = matched
+            }
+            // 判断不出情绪：保留当前表情，等待自主心跳在平静池内调整
         }
         lastFileEmotion = fileEmotion
 
