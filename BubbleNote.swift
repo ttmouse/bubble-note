@@ -165,6 +165,7 @@ final class BubbleView: NSView {
 
         if !text.isEmpty {
             let tp = NSMutableParagraphStyle()
+            tp.alignment = .center
             tp.lineSpacing = 4
             tp.lineBreakMode = .byCharWrapping
             result.append(NSAttributedString(string: text, attributes: [
