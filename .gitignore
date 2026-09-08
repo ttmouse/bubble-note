@@ -5,5 +5,8 @@ BubbleNote.app/
 *.bak-*
 *.bak
 
+# 运行时生成的表情文件（不存在 = 自主随机模式）
+emotion.txt
+
 # macOS
 .DS_Store

@@ -1,28 +1,43 @@
-# BubbleNote - Mac 右下角气泡备忘
+# BubbleNote - 会变表情的 Mac 右下角气泡机器人
 
-在 Mac 桌面右下角显示一个置顶的深色圆角气泡，把指定文案持续展示在屏幕上。
-文案可通过终端命令随时替换，适合人工或各种 AI agent 调用。
+在 Mac 桌面右下角显示一个置顶的深色圆角气泡机器人：上方是表情脸，下方是文案。
+平时它会像活物一样随机切换表情；也可以由你或 agent 用 `note` 命令指定情绪和内容。
 
 ## 快速使用
 
 安装后任意终端执行：
 
 ```bash
-note 文字内容            # 设置气泡文案
-note "多行\n文字"       # 引号保留换行
-echo 文字 | note        # 管道输入
-note                    # 查看当前文案
-note --clear            # 清空（气泡隐藏）
-note --help             # 帮助
+note 文字内容              # 设置内容（表情维持现状）
+note --happy 文字内容      # 指定开心脸 + 内容
+note --auto 文字内容       # 不锁表情：机器人自主随机换脸
+note                       # 查看当前内容与表情
+note --list                # 列出全部可用情绪
+note --clear               # 清空内容和表情（气泡隐藏）
+note --help                # 完整帮助
 ```
 
-`note` 命令位于 `~/.local/bin/note`（软链到本目录 `note`），已在 PATH 中。
+### 情绪参数一览
+
+| 参数 | 表情 | 参数 | 表情 |
+|------|------|------|------|
+| `--happy` / `--开心` | (•‿•) | `--sad` / `--难过` | (T_T) |
+| `--joy` / `--满足` | (◕‿◕) | `--sleepy` / `--困` | zZ(-_-) |
+| `--wink` / `--眨眼` | (｡•̀ᴗ-)✧ | `--meh` / `--无奈` | (︶︹︺) |
+| `--cool` / `--元气` | (•̀ᴗ•́)و | `--angry` / `--生气` | (╬ Ò﹏Ó) |
+| `--think` / `--思考` | (￣～￣) | `--shock` / `--呆` | (￣□￣) |
+| `--huh` / `--疑惑` | (•_•)? | `--playful` / `--调皮` | (¬‿¬) |
+| `--wow` / `--惊讶` | (⊙_⊙) | `--smug` / `--得意` | (￣▽￣) |
+| `--neutral` / `--淡定` | (•_•) | `--face '(^_^)'` | 自定义任意颜文字 |
+
+表情支持中文别名（如 `note --开心 快吃午饭了`）。agent 可用英文参数。
 
 ## 效果
 
-- 气泡固定在屏幕右下角（Dock 上方），置顶显示
-- 半透明深色圆角背景 + 白色文字，鼠标点击穿透不挡操作
-- 文案改变后约 2 秒内自动刷新，无需重启
+- 深色圆角气泡固定屏幕右下角，置顶显示，`emotion.txt` 未锁定时机器人每 6~14 秒随机换一次表情
+- 内容或表情变化后约 2 秒内自动刷新
+- 点击气泡 → 它像受惊的小动物先蹦一下再溜出屏幕躲起来；内容更新后重新出现
+- 字号放大（正文 30pt、表情 40pt），适合远看
 
 ## 手动操作
 
@@ -31,35 +46,38 @@ cd ~/Downloads/GPT插件/bubble-note
 ./build.sh       # 编译 BubbleNote.app（修改源码后执行）
 ./start.sh       # 启动/激活气泡
 ./stop.sh        # 停止气泡（关闭显示）
-echo 新文案 > message.txt   # 直接改文件也能触发更新
 ```
 
 ## 原理
 
 | 组件 | 说明 |
 |------|------|
-| `BubbleNote.swift` | Swift/AppKit 原生无边框置顶窗口，绘制气泡 |
-| `message.txt` | 文案源文件，唯一内容入口 |
-| `note` | CLI 包装：写 message.txt + 必要时自动拉起 BubbleNote |
-| 更新机制 | 目录监听（即时）+ 每 2 秒轮询兜底；已禁用 App Nap |
+| `BubbleNote.swift` | Swift/AppKit 原生无边框置顶窗口；表情行 + 正文富文本渲染 |
+| `message.txt` | 文案源文件 |
+| `emotion.txt` | 表情源文件（一行颜文字）；**不存在/为空 = 自主随机模式** |
+| `note` | CLI 包装：解析情绪参数，写两个文件，必要时自动拉起 BubbleNote |
+| 更新机制 | 目录监听（即时）+ 2 秒轮询兜底 + 禁用 App Nap |
 
-- BubbleNote 以 `.app` 形式通过 `open` 启动，确保进入用户图形会话（从 SSH/agent 环境调用也能正常显示）。
-- 所有窗口相关逻辑在进程内完成，不依赖登录项；开机自启可后续把 app 加入「系统设置 → 登录项」。
+- BubbleNote 以 `.app` 通过 `open` 启动进入用户图形会话（SSH/agent 环境也能正常显示）。
+- 随机表情池与间隔在 `BubbleNote.swift` 的 `Config.aliveFaces` / `Config.aliveIntervalRange` 可调。
+- 样式（颜色/字号/圆角/位置/背景）都在 `Config` 中可改。
 
 ## 项目文件
 
 ```
 bubble-note/
 ├── BubbleNote.swift      # 源码
-├── BubbleNote.app/       # 编译产物（Contents/Info.plist 等）
+├── BubbleNote.app/       # 编译产物（已 git 忽略，可 ./build.sh 重建）
 ├── message.txt           # 文案文件
-├── note                  # CLI 主脚本
+├── emotion.txt           # 表情文件（运行时生成，可忽略）
+├── note                  # CLI 主脚本（软链到 ~/.local/bin/note）
 ├── build.sh / start.sh / stop.sh
-└── README.md
+├── .gitignore / README.md
 ```
 
 ## 常见问题
 
-- 气泡没显示：确认进程在运行 `pgrep -x BubbleNote`；不在则 `note 文字` 会自动拉起或 `./start.sh`。
-- 改了文案没反应：等待约 2 秒轮询；检查 message.txt 是否真的被修改。
-- 想改样式（颜色/字号/圆角/位置）：编辑 `BubbleNote.swift` 顶部 `Config` 后 `./build.sh` 并重启。
+- 气泡没显示：`pgrep -x BubbleNote` 确认；不在则 `note 文字` 会自动拉起或 `./start.sh`。
+- 想让它一直保持自主随机：确保没有 `emotion.txt`（`note --auto` 会清掉）。
+- 改了内容没反应：等约 2 秒轮询；确认写的是 `message.txt` / `emotion.txt`。
+- 想调换脸频率或表情集：改 `Config.aliveFaces` 与 `Config.aliveIntervalRange` 后 `./build.sh`。

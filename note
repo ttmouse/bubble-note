@@ -1,16 +1,29 @@
 #!/bin/bash
-# note - 更新/查看右下角气泡文案（BubbleNote）
+# note - 更新/查看右下角气泡机器人（BubbleNote）
 #
-# 用法：
-#   note 文字内容          设置文案（多个词自动用空格连接）
+# 内容：
+#   note 文字内容           设置文案（多个词自动空格连接）
 #   note "第一行
-#   第二行"                引号内保留换行，支持多行
-#   echo 文字 | note       从管道/标准输入读取内容
-#   note                   无参数时查看当前文案
-#   note --clear           清空文案（气泡隐藏）
-#   note --help            显示本帮助
+#   第二行"                 引号内保留换行，支持多行
+#   echo 文字 | note        从管道/标准输入读取内容
+#   note                    无参数时查看当前内容与表情
+#   note --clear            清空内容和表情（气泡隐藏）
 #
-# 说明：内容写入 message.txt 后，BubbleNote 监听到变化会自动刷新气泡。
+# 表情（颜文字机器人脸，写在 emotion.txt）：
+#   note --happy 文字       锁定开心脸 (•‿•)
+#   note --joy 文字         满足 (◕‿◕)     note --wink 文字    眨眼 (｡•̀ᴗ-)✧
+#   note --cool 文字        元气 (•̀ᴗ•́)و   note --think 文字   思考 (￣～￣)
+#   note --huh 文字         疑惑 (•_•)?    note --wow 文字     惊讶 (⊙_⊙)
+#   note --playful 文字     调皮 (¬‿¬)     note --smug 文字    得意 (￣▽￣)
+#   note --neutral 文字     淡定 (•_•)     note --sad 文字     难过 (T_T)
+#   note --sleepy 文字      犯困 zZ(-_-)   note --meh 文字     无奈 (︶︹︺)
+#   note --angry 文字       生气 (╬ Ò﹏Ó)  note --shock 文字   呆住 (￣□￣)
+#   note --face '颜文字' 文字  自定义表情脸
+#   note --auto 文字        不锁定表情：机器人自主随机换表情
+#   （纯表情操作可不带内容，如 note --auto 仅恢复自主模式）
+#
+# 说明：中文情绪别名同样可用（如 note --开心 文字）。
+# 内容写入 message.txt、表情写入 emotion.txt，BubbleNote 自动刷新。
 
 set -euo pipefail
 
@@ -24,47 +37,144 @@ done
 DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
 MSG_FILE="$DIR/message.txt"
+EMO_FILE="$DIR/emotion.txt"
 
 # ---- 帮助 ----
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
-# ---- 清空 ----
-if [ "${1:-}" = "--clear" ]; then
+# ---- 情绪参数解析 ----
+FACE=""          # 若非空：要锁定的表情
+AUTO=0           # 1 = 恢复自主随机（清空 emotion.txt）
+IS_CLEAR=0       # 1 = --clear
+CONTENT_PARTS=() # 正文参数
+
+resolve_face() {
+    # 依据情绪名输出颜文字；不识别则输出原参数（留给 --face 自定义）
+    case "$1" in
+        happy|开心)    echo "(•‿•)" ;;
+        joy|满足)      echo "(◕‿◕)" ;;
+        wink|眨眼)     echo "(｡•̀ᴗ-)✧" ;;
+        cool|元气)     echo "(•̀ᴗ•́)و" ;;
+        think|思考)    echo "(￣～￣)" ;;
+        huh|疑惑|疑问) echo "(•_•)?" ;;
+        wow|惊讶)      echo "(⊙_⊙)" ;;
+        playful|调皮)  echo "(¬‿¬)" ;;
+        smug|得意)     echo "(￣▽￣)" ;;
+        neutral|淡定|平静) echo "(•_•)" ;;
+        sad|难过|伤心) echo "(T_T)" ;;
+        sleepy|困)     echo "zZ(-_-)" ;;
+        meh|无奈)      echo "(︶︹︺)" ;;
+        angry|生气)    echo "(╬ Ò﹏Ó)" ;;
+        shock|呆)      echo "(￣□￣)" ;;
+        *) echo "" ;;
+    esac
+}
+
+# 预览颜文字时提示的中文名映射（仅用于 --list）
+face_name() {
+    case "$1" in
+        "(•‿•)")  echo "开心 happy" ;;
+        "(◕‿◕)")  echo "满足 joy" ;;
+        "(｡•̀ᴗ-)✧") echo "眨眼 wink" ;;
+        "(•̀ᴗ•́)و") echo "元气 cool" ;;
+        "(￣～￣)") echo "思考 think" ;;
+        "(•_•)?") echo "疑惑 huh" ;;
+        "(⊙_⊙)")  echo "惊讶 wow" ;;
+        "(¬‿¬)")  echo "调皮 playful" ;;
+        "(￣▽￣)") echo "得意 smug" ;;
+        "(•_•)")  echo "淡定 neutral" ;;
+        "(T_T)")  echo "难过 sad" ;;
+        "zZ(-_-)") echo "犯困 sleepy" ;;
+        "(︶︹︺)") echo "无奈 meh" ;;
+        "(╬ Ò﹏Ó)") echo "生气 angry" ;;
+        "(￣□￣)") echo "呆住 shock" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list)
+            echo "可用情绪："
+            for f in "(•‿•)" "(◕‿◕)" "(｡•̀ᴗ-)✧" "(•̀ᴗ•́)و" "(￣～￣)" "(•_•)?" "(⊙_⊙)" "(¬‿¬)" "(￣▽￣)" "(•_•)" "(T_T)" "zZ(-_-)" "(︶︹︺)" "(╬ Ò﹏Ó)" "(￣□￣)"; do
+                echo "  $f  →  $(face_name "$f")"
+            done
+            echo "用法示例：note --开心 需要开会了"
+            exit 0
+            ;;
+        --happy|--joy|--wink|--cool|--think|--huh|--wow|--playful|--smug|--neutral|--sad|--sleepy|--meh|--angry|--shock|--开心|--满足|--眨眼|--元气|--思考|--疑惑|--疑问|--惊讶|--调皮|--得意|--淡定|--平静|--难过|--伤心|--困|--无奈|--生气|--呆)
+            FACE="$(resolve_face "${1#--}")"
+            shift ;;
+        --face)
+            shift
+            FACE="${1:-}"
+            shift ;;
+        --auto)
+            AUTO=1
+            shift ;;
+        --clear)
+            IS_CLEAR=1
+            shift ;;
+        *)
+            CONTENT_PARTS+=("$1")
+            shift ;;
+    esac
+done
+
+# ---- --clear：清空内容与表情 ----
+if [ "$IS_CLEAR" = "1" ]; then
     : > "$MSG_FILE"
-    echo "气泡文案已清空"
+    : > "$EMO_FILE"
+    echo "气泡已清空（内容与表情），机器人去休息了"
     exit 0
 fi
 
-# ---- 确定内容来源 ----
-if [ -p /dev/stdin ] && [ "$#" -eq 0 ]; then
-    # 管道输入（如 echo xxx | note）
-    CONTENT="$(cat)"
-elif [ "$#" -ge 1 ]; then
-    # 直接传参，多个参数用空格连接
-    CONTENT="$*"
+# ---- 组装内容 ----
+if [ ${#CONTENT_PARTS[@]} -gt 0 ]; then
+    CONTENT="${CONTENT_PARTS[*]}"
 else
-    # 无参数且无管道：查看当前文案
-    if [ -f "$MSG_FILE" ]; then
-        echo "当前气泡文案："
-        cat "$MSG_FILE"
+    # 无内容参数：可能是管道输入
+    if [ -p /dev/stdin ]; then
+        CONTENT="$(cat)"
     else
-        echo "文案文件不存在：$MSG_FILE"
-        exit 1
+        CONTENT=""
+    fi
+fi
+
+# ---- 行为：仅查看 ----
+if [ -z "$CONTENT" ] && [ -z "$FACE" ] && [ "$AUTO" = "0" ]; then
+    echo "当前气泡文案："
+    cat "$MSG_FILE" 2>/dev/null || true
+    echo ""
+    echo "当前表情："
+    if [ -s "$EMO_FILE" ]; then
+        cat "$EMO_FILE"
+        echo ""
+    else
+        echo "（未锁定，机器人自主随机切换中）"
     fi
     exit 0
 fi
 
-# ---- 写入并确保 BubbleNote 在运行 ----
-if [ -z "$CONTENT" ]; then
-    echo "内容为空，未做任何修改（如需清空请用 note --clear）"
-    exit 1
+# ---- 执行更新 ----
+# 1) 表情：--face/情绪名 → 锁定；--auto → 清空解锁；无表情参数 → 不动 emotion.txt
+if [ -n "$FACE" ]; then
+    printf '%s\n' "$FACE" > "$EMO_FILE"
+elif [ "$AUTO" = "1" ]; then
+    if [ -f "$EMO_FILE" ]; then
+        rm -f "$EMO_FILE"
+    fi
 fi
 
-printf '%s\n' "$CONTENT" > "$MSG_FILE"
+# 2) 内容：有内容才写 message.txt
+if [ -n "$CONTENT" ]; then
+    printf '%s\n' "$CONTENT" > "$MSG_FILE"
+fi
 
+# 3) 确保 BubbleNote 在运行
 if ! pgrep -x BubbleNote > /dev/null 2>&1; then
     open "$DIR/BubbleNote.app" 2>/dev/null && sleep 0.5
     if pgrep -x BubbleNote > /dev/null 2>&1; then
@@ -74,5 +184,14 @@ if ! pgrep -x BubbleNote > /dev/null 2>&1; then
     fi
 fi
 
-echo "气泡文案已更新："
-echo "$CONTENT"
+# 4) 回显
+echo "气泡已更新："
+if [ -n "$FACE" ]; then
+    echo "  表情：$FACE（$(face_name "$FACE")）"
+elif [ "$AUTO" = "1" ]; then
+    echo "  表情：自主随机（已解锁）"
+fi
+if [ -n "$CONTENT" ]; then
+    echo "  内容："
+    echo "$CONTENT"
+fi
